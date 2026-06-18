@@ -1,0 +1,75 @@
+<%- include('partials/header') %>
+<nav>
+    <ul>
+        <li><a href="#feiras">Feiras</a></li>
+        <li><a href="#produtos">Produtos</a></li>
+        <li><a href="#expositores">Expositores</a></li>
+        <li><a href="#contato">Contato</a></li>
+        <li><a href="/admin">Admin</a></li>
+    </ul>
+</nav>
+
+<div class="banner">
+    <h1>Bem-vindo às Feiras Ecológicas de Porto Alegre!</h1>
+</div>
+
+<main>
+    <div class="container">
+        <section id="feiras">
+            <h2>Feiras</h2>
+            <div class="grid-container">
+            <% feiras.forEach(feira => { %>
+                <div class="grid-item">
+                    <h3><%= feira.nome %></h3>
+                    <p><%= feira.descricao %></p>
+                </div>
+            <% }) %>
+            </div>
+        </section>
+
+        <section id="produtos">
+            <h2>Produtos</h2>
+            <div class="grid-container">
+            <% produtos.forEach(produto => { %>
+                <div class="grid-item">
+                    <img src="/<%= produto.foto %>" alt="<%= produto.nome %>" width="150" height="200" style="object-fit:cover; border-radius:8px;">
+                    <h3><%= produto.nome %></h3>
+                    <p>R$ <%= produto.preco.toFixed(2).replace('.', ',') %></p>
+                    <p><%= produto.descricao %></p>
+                </div>
+            <% }) %>
+            </div>
+        </section>
+
+        <section id="expositores">
+            <h2>Expositores</h2>
+            <div class="grid-container">
+            <% expositores.forEach(expositor => { %>
+                <div class="grid-item">
+                    <h3><%= expositor.nome %></h3>
+                    <p>Produtos: <%= expositor.produtos %></p>
+                    <% if (expositor.foto) { %>
+                        <img src="/<%= expositor.foto %>" alt="Foto de <%= expositor.nome %>" width="150">
+                    <% } %>
+                </div>
+            <% }) %>
+            </div>
+        </section>
+
+        <section id="contato">
+            <h2>Contato</h2>
+            <% if (message) { %>
+                <p class="sucesso"><%= message %></p>
+            <% } %>
+            <form method="POST" action="/contato">
+                <input type="text" name="nome" placeholder="Nome" required>
+                <input type="text" name="telefone" placeholder="Telefone" required>
+                <input type="email" name="email" placeholder="E-mail" required>
+                <textarea name="mensagem" placeholder="Mensagem" required></textarea>
+                <button type="submit">Enviar</button>
+            </form>
+        </section>
+    </div>
+</main>
+
+<%- include('partials/footer') %>

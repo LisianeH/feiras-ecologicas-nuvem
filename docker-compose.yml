@@ -1,0 +1,36 @@
+version: '3.9'
+
+services:
+  app:
+    build: .
+    image: feiras-node-app
+    ports:
+      - '3000:3000'
+    environment:
+      - DB_HOST=db
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=feiras
+      - DB_PORT=3306
+      - SESSION_SECRET=alterar_para_um_segredo_forte
+      - PORT=3000
+    depends_on:
+      - db
+    volumes:
+      - ./:/usr/src/app
+      - /usr/src/app/node_modules
+
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ''
+      MYSQL_DATABASE: feiras
+    ports:
+      - '3306:3306'
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./bd/feiras.sql:/docker-entrypoint-initdb.d/feiras.sql:ro
+
+volumes:
+  db_data:

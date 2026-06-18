@@ -1,0 +1,80 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #f9f9f9;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+form {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+    max-width: 400px;
+    width: 100%;
+}
+
+fieldset {
+    border: none;
+    padding: 0;
+}
+
+legend {
+    font-size: 24px;
+    color: #000000;
+    margin-bottom: 15px;
+    text-align: center;
+    font-weight: bold;
+}
+
+input[type="email"],
+input[type="password"] {
+    width: 100%;
+    padding: 12px;
+    margin: 10px 0;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-sizing: border-box;
+    font-size: 16px;
+}
+
+/* Mensagem de Erro */
+.erro-login {
+    color: #f44336;
+    font-size: 12px;
+    margin: 5px 5px;
+    text-align: center;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #3fa03f;
+}
+
+.voltar {
+    text-align: center;
+    margin-top: 15px;
+}
+
+.voltar a {
+    color: #4CAF50;
+    text-decoration: none;
+    font-size: 16px;
+}
+
+.voltar a:hover {
+    text-decoration: underline;
+}

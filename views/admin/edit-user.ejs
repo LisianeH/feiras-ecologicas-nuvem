@@ -1,0 +1,21 @@
+<%- include('../partials/header') %>
+<link rel="stylesheet" href="/style/style-admin.css">
+<div class="top-admin">
+    <h1>Editar Administrador</h1>
+</div>
+<main>
+    <% if (message) { %>
+        <p class="sucesso"><%= message %></p>
+    <% } %>
+    <form action="/admin/usuarios/edit/<%= usuario.id %>" method="POST" enctype="multipart/form-data">
+        <input type="text" name="nome" value="<%= usuario.nome %>" required>
+        <input type="email" name="email" value="<%= usuario.email %>" required>
+        <input type="password" name="senha" placeholder="Nova senha (opcional)"><br>
+        <label>Foto atual:</label>
+        <img src="/<%= usuario.foto %>" alt="<%= usuario.nome %>" width="70" style="border-radius:50%; margin-bottom:10px;"><br>
+        <input type="file" name="fotoUsuario"><br><br>
+        <button type="submit" class="botao-principal">Salvar Alterações</button>
+        <a href="/admin/usuarios" class="botao-voltar">← Voltar</a>
+    </form>
+</main>
+<%- include('../partials/footer') %>
