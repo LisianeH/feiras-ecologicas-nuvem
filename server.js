@@ -3,6 +3,8 @@ const express = require('express');
 const session = require('express-session');
 const mysql = require('mysql2/promise');
 const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
@@ -11,20 +13,107 @@ const fs = require('fs').promises;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'feiras',
-  port: parseInt(process.env.DB_PORT, 10) || 3307,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+let pool;
+
+async function initializeDatabase() {
+  let dbConfig = {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'feiras',
+    port: parseInt(process.env.DB_PORT, 10) || 3307
+  };
+
+  const secretArn = process.env.DB_SECRET_ARN;
+  if (secretArn) {
+    console.log('Buscando credenciais do banco no AWS Secrets Manager...');
+    try {
+      const client = new SecretsManagerClient({ region: process.env.AWS_REGION || 'sa-east-1' });
+      const response = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+      if (response.SecretString) {
+        const secret = JSON.parse(response.SecretString);
+        dbConfig.host = secret.host || dbConfig.host;
+        dbConfig.user = secret.username || dbConfig.user;
+        dbConfig.password = secret.password || dbConfig.password;
+        dbConfig.database = secret.dbname || dbConfig.database;
+        dbConfig.port = parseInt(secret.port, 10) || dbConfig.port;
+        console.log(`Credenciais obtidas com sucesso. Conectando no banco de dados AWS RDS em: ${dbConfig.host}`);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar credenciais do banco no Secrets Manager, utilizando variáveis locais do .env:', error);
+    }
+  }
+
+  pool = mysql.createPool({
+    ...dbConfig,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+  });
+}
 
 const sessionSecret = process.env.SESSION_SECRET || 'alterar_para_um_segredo_forte';
 const queueUrl = process.env.SQS_QUEUE_URL || '';
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const s3Client = new S3Client({ region: process.env.AWS_REGION || 'sa-east-1' });
+const bucketName = process.env.S3_BUCKET_NAME || '';
+
+function getContentType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.svg') return 'image/svg+xml';
+  return 'image/jpeg';
+}
+
+async function uploadToS3(localFilePath, s3Key) {
+  try {
+    const fileContent = await fs.readFile(localFilePath);
+    const contentType = getContentType(localFilePath);
+    await s3Client.send(new PutObjectCommand({
+      Bucket: bucketName,
+      Key: s3Key,
+      Body: fileContent,
+      ContentType: contentType
+    }));
+    console.log(`Upload para S3 concluído: ${s3Key}`);
+  } catch (error) {
+    console.error(`Erro ao fazer upload do arquivo ${localFilePath} para o S3:`, error);
+    throw error;
+  }
+}
+
+async function syncLocalImagesToS3() {
+  if (!bucketName) return;
+  console.log('Iniciando sincronização de imagens locais com o S3...');
+  const dirs = [
+    'imagens/banner',
+    'imagens/expositores',
+    'imagens/produtos',
+    'imagens/usuarios'
+  ];
+
+  for (const dir of dirs) {
+    try {
+      const dirPath = path.join(__dirname, dir);
+      await fs.mkdir(dirPath, { recursive: true });
+      const files = await fs.readdir(dirPath);
+      for (const file of files) {
+        const localPath = path.join(dirPath, file);
+        const stat = await fs.stat(localPath);
+        if (stat.isFile()) {
+          const s3Key = `${dir}/${file}`;
+          await uploadToS3(localPath, s3Key).catch(err => {
+            console.error(`Falha ao sincronizar ${s3Key}:`, err);
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`Erro ao ler diretório ${dir} para sincronização S3:`, err);
+    }
+  }
+  console.log('Sincronização de imagens locais concluída.');
+}
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -39,6 +128,13 @@ app.use(session({
 
 app.use(express.static(path.join(__dirname)));
 app.use('/style', express.static(path.join(__dirname, 'style')));
+app.use('/imagens', (req, res, next) => {
+  if (bucketName) {
+    const s3Url = `https://${bucketName}.s3.${process.env.AWS_REGION || 'sa-east-1'}.amazonaws.com/imagens${req.path}`;
+    return res.redirect(s3Url);
+  }
+  next();
+});
 app.use('/imagens', express.static(path.join(__dirname, 'imagens')));
 app.use('/video', express.static(path.join(__dirname, 'video')));
 
@@ -189,6 +285,17 @@ app.post('/admin/produtos', ensureAdmin, upload.single('fotoProduto'), async (re
   }
 
   const fotoDb = `imagens/produtos/${req.file.filename}`;
+
+  if (bucketName) {
+    try {
+      await uploadToS3(req.file.path, fotoDb);
+      await fs.unlink(req.file.path).catch(() => {});
+    } catch (error) {
+      console.error('Erro ao enviar imagem do produto para o S3:', error);
+      return res.redirect('/admin?message=Erro ao enviar imagem para o S3.');
+    }
+  }
+
   const connection = await pool.getConnection();
   try {
     await connection.query(
@@ -207,8 +314,15 @@ app.get('/admin/produtos/delete/:id', ensureAdmin, async (req, res) => {
   try {
     const [rows] = await connection.query('SELECT foto FROM produtos WHERE id = ?', [id]);
     if (rows.length > 0) {
-      const fotoPath = path.join(__dirname, rows[0].foto);
+      const fotoDb = rows[0].foto;
+      const fotoPath = path.join(__dirname, fotoDb);
       await fs.unlink(fotoPath).catch(() => {});
+      if (bucketName) {
+        await s3Client.send(new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: fotoDb
+        })).catch(err => console.error('Erro ao deletar imagem do produto do S3:', err));
+      }
       await connection.query('DELETE FROM produtos WHERE id = ?', [id]);
     }
     res.redirect('/admin?message=Produto excluído com sucesso!');
@@ -247,6 +361,17 @@ app.post('/admin/usuarios/add', ensureAdmin, upload.single('fotoUsuario'), async
   }
 
   const fotoDb = `imagens/usuarios/${req.file.filename}`;
+
+  if (bucketName) {
+    try {
+      await uploadToS3(req.file.path, fotoDb);
+      await fs.unlink(req.file.path).catch(() => {});
+    } catch (error) {
+      console.error('Erro ao enviar foto do usuário para o S3:', error);
+      return res.redirect('/admin/usuarios/add?message=Erro ao enviar imagem para o S3.');
+    }
+  }
+
   const connection = await pool.getConnection();
   try {
     await connection.query(
@@ -299,8 +424,18 @@ app.post('/admin/usuarios/edit/:id', ensureAdmin, upload.single('fotoUsuario'), 
   }
 
   if (req.file) {
+    const fotoDb = `imagens/usuarios/${req.file.filename}`;
+    if (bucketName) {
+      try {
+        await uploadToS3(req.file.path, fotoDb);
+        await fs.unlink(req.file.path).catch(() => {});
+      } catch (error) {
+        console.error('Erro ao enviar nova foto do usuário para o S3:', error);
+        return res.redirect(`/admin/usuarios/edit/${id}?message=Erro ao enviar imagem para o S3.`);
+      }
+    }
     updates.push('foto = ?');
-    params.push(`imagens/usuarios/${req.file.filename}`);
+    params.push(fotoDb);
   }
 
   params.push(id);
@@ -327,8 +462,15 @@ app.get('/admin/usuarios/delete/:id', ensureAdmin, async (req, res) => {
   try {
     const [rows] = await connection.query('SELECT foto FROM usuarios WHERE id = ?', [id]);
     if (rows.length > 0 && rows[0].foto) {
-      const fotoPath = path.join(__dirname, rows[0].foto);
+      const fotoDb = rows[0].foto;
+      const fotoPath = path.join(__dirname, fotoDb);
       await fs.unlink(fotoPath).catch(() => {});
+      if (bucketName) {
+        await s3Client.send(new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: fotoDb
+        })).catch(err => console.error('Erro ao deletar foto do usuário do S3:', err));
+      }
     }
     await connection.query('DELETE FROM usuarios WHERE id = ?', [id]);
     res.redirect('/admin/usuarios?message=Usuário excluído com sucesso!');
@@ -337,6 +479,10 @@ app.get('/admin/usuarios/delete/:id', ensureAdmin, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
-});
+async function startServer() {
+  await initializeDatabase();
+  app.listen(PORT, () => {
+    console.log(`Servidor rodando em http://localhost:${PORT}`);
+  });
+}
+startServer();
