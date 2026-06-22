@@ -34,7 +34,7 @@
                 <div class="grid-item">
                     <img src="/<%= produto.foto %>" alt="<%= produto.nome %>" width="150" height="200" style="object-fit:cover; border-radius:8px;">
                     <h3><%= produto.nome %></h3>
-                    <p>R$ <%= produto.preco.toFixed(2).replace('.', ',') %></p>
+                    <p>R$ <%= Number(produto.preco).toFixed(2).replace('.', ',') %></p>
                     <p><%= produto.descricao %></p>
                 </div>
             <% }) %>
