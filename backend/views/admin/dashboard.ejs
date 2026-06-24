@@ -1,0 +1,92 @@
+<%- include('../partials/header') %>
+<link rel="stylesheet" href="/style/style-admin.css">
+<div class="top-admin">
+    <div>
+        <h1>Acesso ao Painel Administrativo</h1>
+        <h3>Bem vindo(a), <%= user.nome %></h3>
+    </div>
+    <div class="user-info">
+        <img src="/<%= user.foto %>" alt="Foto de <%= user.nome %>" class="foto-admin">
+        <div>
+            <small><%= user.email %></small>
+        </div>
+    </div>
+</div>
+
+<nav>
+    <ul>
+        <li><a href="#mensagens">Mensagens</a></li>
+        <li><a href="#adicionarProduto">Adicionar Produto</a></li>
+        <li><a href="#produtos">Produtos</a></li>
+        <li><a href="/admin/usuarios">Administradores</a></li>
+        <li><a href="/admin/logout">Sair</a></li>
+    </ul>
+</nav>
+
+<main>
+    <% if (message) { %>
+        <p class="sucesso"><%= message %></p>
+    <% } %>
+
+    <section id="mensagens">
+        <h2>Mensagens Recebidas</h2>
+        <% mensagens.forEach(msg => { %>
+            <div class="card">
+                <strong>Nome:</strong> <%= msg.nome %><br>
+                <strong>E-mail:</strong> <%= msg.email %><br>
+                <strong>Telefone:</strong> <%= msg.telefone %><br>
+                <p><strong>Mensagem:</strong> <%= msg.mensagem %></p>
+                <small>Enviado em: <%= new Date(msg.data_envio).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) %></small>
+            </div>
+        <% }) %>
+    </section>
+
+    <section id="adicionarProduto">
+        <h2>Adicionar novo produto</h2>
+        <form action="/admin/produtos" method="POST" enctype="multipart/form-data">
+            <input type="text" name="nome" placeholder="Nome do Produto" required>
+            <input type="number" name="preco" placeholder="Preço" step="0.01" required>
+            <textarea name="descricao" placeholder="Descrição" required></textarea>
+            <input type="file" name="fotoProduto" required>
+            <button type="submit">Cadastrar Produto</button>
+        </form>
+    </section>
+
+    <section id="produtos">
+        <h2>Produtos Cadastrados</h2>
+        <div class="grid-container">
+        <% produtos.forEach(produto => { %>
+            <div class="grid-item">
+                <img src="/<%= produto.foto %>" alt="<%= produto.nome %>" width="150" height="200" style="object-fit:cover; border-radius:8px;">
+                <h3><%= produto.nome %></h3>
+                <p>R$ <%= Number(produto.preco).toFixed(2).replace('.', ',') %></p>
+                <p><%= produto.descricao %></p>
+                <a href="/admin/produtos/delete/<%= produto.id %>" onclick="return confirm('Tem certeza que deseja excluir este produto?')" class="botao-excluir">Excluir</a>
+            </div>
+        <% }) %>
+        </div>
+    </section>
+
+    <section id="usuarios">
+        <h2>Administradores Cadastrados</h2>
+        <a href="/admin/usuarios/add" class="botao-adicionar">+ Adicionar Novo Administrador</a>
+
+        <div class="lista-usuarios">
+            <% usuarios.forEach(usuario => { %>
+                <div class="usuario-item">
+                    <img src="/<%= usuario.foto %>" alt="<%= usuario.nome %>" class="foto-admin">
+                    <div class="usuario-info">
+                        <h3><%= usuario.nome %></h3>
+                        <p><%= usuario.email %></p>
+                    </div>
+                    <div class="usuario-acoes">
+                        <a href="/admin/usuarios/edit/<%= usuario.id %>" class="editar">Editar</a>
+                        <a href="/admin/usuarios/delete/<%= usuario.id %>" class="excluir" onclick="return confirm('Tem certeza que deseja excluir este usuário?')">Excluir</a>
+                    </div>
+                </div>
+            <% }) %>
+        </div>
+    </section>
+</main>
+
+<%- include('../partials/footer') %>
