@@ -1,11 +1,12 @@
 version: '3.9'
 
 services:
-  app:
-    build: .
-    image: feiras-node-app
+  backend:
+    build:
+      context: ./backend
+    image: feiras-backend
     ports:
-      - '3000:3000'
+      - '4000:4000'
     environment:
       - DB_HOST=db
       - DB_USER=root
@@ -13,11 +14,31 @@ services:
       - DB_NAME=feiras
       - DB_PORT=3306
       - SESSION_SECRET=alterar_para_um_segredo_forte
-      - PORT=3000
+      - PORT=4000
+      - AWS_REGION=us-east-1
+      - SQS_QUEUE_URL=
+      - NOTIFICATIONS_SQS_QUEUE_URL=
+      - SNS_TOPIC_ARN=
     depends_on:
       - db
     volumes:
-      - ./:/usr/src/app
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+
+  frontend:
+    build:
+      context: ./frontend
+    image: feiras-frontend
+    ports:
+      - '3000:3000'
+    environment:
+      - API_URL=http://backend:4000
+      - ADMIN_URL=http://backend:4000
+      - PORT=3000
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/usr/src/app
       - /usr/src/app/node_modules
 
   db:
