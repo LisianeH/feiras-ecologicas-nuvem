@@ -5,7 +5,7 @@
         <li><a href="#produtos">Produtos</a></li>
         <li><a href="#expositores">Expositores</a></li>
         <li><a href="#contato">Contato</a></li>
-        <li><a href="/admin">Admin</a></li>
+        <li><a href="<%= adminUrl %>">Admin</a></li>
     </ul>
 </nav>
 
@@ -32,7 +32,7 @@
             <div class="grid-container">
             <% produtos.forEach(produto => { %>
                 <div class="grid-item">
-                    <img src="/<%= produto.foto %>" alt="<%= produto.nome %>" width="150" height="200" style="object-fit:cover; border-radius:8px;">
+                    <img src="<%= apiUrl %>/<%= produto.foto %>" alt="<%= produto.nome %>" width="150" height="200" style="object-fit:cover; border-radius:8px;">
                     <h3><%= produto.nome %></h3>
                     <p>R$ <%= Number(produto.preco).toFixed(2).replace('.', ',') %></p>
                     <p><%= produto.descricao %></p>
@@ -49,7 +49,7 @@
                     <h3><%= expositor.nome %></h3>
                     <p>Produtos: <%= expositor.produtos %></p>
                     <% if (expositor.foto) { %>
-                        <img src="/<%= expositor.foto %>" alt="Foto de <%= expositor.nome %>" width="150">
+                        <img src="<%= apiUrl %>/<%= expositor.foto %>" alt="Foto de <%= expositor.nome %>" width="150">
                     <% } %>
                 </div>
             <% }) %>
@@ -67,6 +67,18 @@
                 <input type="email" name="email" placeholder="E-mail" required>
                 <textarea name="mensagem" placeholder="Mensagem" required></textarea>
                 <button type="submit">Enviar</button>
+            </form>
+        </section>
+
+        <section id="notificacoes">
+            <h2>Receber notificações</h2>
+            <% if (message) { %>
+                <p class="sucesso"><%= message %></p>
+            <% } %>
+            <form method="POST" action="/notificacoes">
+                <input type="text" name="nome" placeholder="Nome" required>
+                <input type="email" name="email" placeholder="E-mail" required>
+                <button type="submit">Quero receber notificações</button>
             </form>
         </section>
     </div>

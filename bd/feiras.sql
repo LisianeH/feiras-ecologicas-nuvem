@@ -99,6 +99,27 @@ INSERT INTO `mensagens` (`id`, `nome`, `telefone`, `email`, `mensagem`, `data_en
 -- --------------------------------------------------------
 
 --
+-- Estrutura para tabela `notificacoes`
+--
+
+CREATE TABLE `notificacoes` (
+  `id` int(11) NOT NULL,
+  `nome` varchar(128) NOT NULL,
+  `email` varchar(128) NOT NULL,
+  `data_inscricao` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Despejando dados para a tabela `notificacoes`
+--
+
+INSERT INTO `notificacoes` (`id`, `nome`, `email`, `data_inscricao`) VALUES
+(1, 'Ana Souza', 'ana.souza@email.com', '2025-07-05 10:12:00'),
+(2, 'Bruno Lima', 'bruno.lima@email.com', '2025-07-07 15:30:00');
+
+-- --------------------------------------------------------
+
+--
 -- Estrutura para tabela `produtos`
 --
 
@@ -182,6 +203,12 @@ ALTER TABLE `usuarios`
   ADD PRIMARY KEY (`id`);
 
 --
+-- Índices de tabela `notificacoes`
+--
+ALTER TABLE `notificacoes`
+  ADD PRIMARY KEY (`id`);
+
+--
 -- AUTO_INCREMENT para tabelas despejadas
 --
 
@@ -214,6 +241,12 @@ ALTER TABLE `produtos`
 --
 ALTER TABLE `usuarios`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+
+--
+-- AUTO_INCREMENT de tabela `notificacoes`
+--
+ALTER TABLE `notificacoes`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
