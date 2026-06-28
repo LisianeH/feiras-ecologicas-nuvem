@@ -19,6 +19,8 @@ A solução será implementada em AWS com microserviços, usando:
 - SQS e SNS para mensageria;
 - CloudWatch para observabilidade e logs.
 
+![alt text](arq.png)
+
 ### Motivo da arquitetura de microserviços
 
 - separação de responsabilidades entre frontend e backend;
