@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Feiras Ecologicas - Stack completa (3 camadas).
+  Provisiona, em um unico stack: RDS MySQL + EC2 Backend (porta 4000) + EC2 Frontend (porta 3000).
+  O frontend descobre o backend automaticamente e o backend le a senha do banco do Secrets Manager.
+
+# ---------------------------------------------------------------------------
+# Parametros
+# ---------------------------------------------------------------------------
+Parameters:
+  InstanceType:
+    Description: 'Tipo das instancias EC2 (Free-Tier: t3.micro)'
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+
+  LatestUbuntuAMI:
+    Description: 'AMI do Ubuntu 22.04 (resolvida automaticamente pela regiao via SSM)'
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+
+  KeyName:
+    Description: 'Opcional - nome de um KeyPair existente para acesso SSH'
+    Type: String
+    Default: ''
+
+  SSHLocation:
+    Description: 'Faixa de IP autorizada a acessar SSH (use seu IP/32 em producao)'
+    Type: String
+    Default: '0.0.0.0/0'
+
+  RepoURL:
+    Description: 'URL do repositorio Git do projeto'
+    Type: String
+    Default: 'https://github.com/LisianeH/feiras-ecologicas-nuvem.git'
+
+  SessionSecret:
+    Description: 'Segredo de sessao do backend (express-session)'
+    Type: String
+    NoEcho: true
+    Default: 'troque-este-segredo-em-producao'
+
+  # ---- Banco de dados ----
+  DBName:
+    Description: 'Nome do banco de dados'
+    Type: String
+    Default: feiras
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBUser:
+    Description: 'Usuario master do banco'
+    Type: String
+    Default: admin
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBInstanceClass:
+    Description: 'Classe da instancia RDS (Free-Tier: db.t3.micro)'
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t4g.micro
+      - db.t4g.small
+
+  AllocatedStorage:
+    Description: 'Tamanho do banco em GB'
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+
+  NotificationEmail:
+    Description: 'E-mail que assina o topico SNS e recebe os avisos de novas inscricoes'
+    Type: String
+    Default: 'gabriellessa251@gmail.com'
+
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+
+# ---------------------------------------------------------------------------
+# Recursos
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # CAMADA DE DADOS - RDS MySQL
+  # =========================================================================
+  RDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'MySQL (3306) acessivel apenas pelo backend'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !GetAtt BackendSecurityGroup.GroupId
+
+  RDSInstance:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: Delete
+    Properties:
+      DBName: !Ref DBName
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUser
+      ManageMasterUserPassword: true          # senha gerenciada pelo Secrets Manager
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      PubliclyAccessible: false                # acesso somente interno (via backend)
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+
+  # =========================================================================
+  # CAMADA DE APLICACAO - EC2 Backend (porta 4000)
+  # =========================================================================
+  BackendSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Backend Express - API/admin (4000) e SSH (22)'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+
+  BackendRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: backend-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Ler a senha do banco gerenciada pelo Secrets Manager
+              - Effect: Allow
+                Action: 'secretsmanager:GetSecretValue'
+                Resource: !GetAtt RDSInstance.MasterUserSecret.SecretArn
+              # Mensageria opcional (so funciona se SQS_QUEUE_URL/SNS_TOPIC_ARN forem configurados)
+              - Effect: Allow
+                Action:
+                  - 'sqs:SendMessage'
+                  - 'sns:Publish'
+                Resource: '*'
+
+  BackendInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref BackendRole
+
+  BackendInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestUbuntuAMI
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      IamInstanceProfile: !Ref BackendInstanceProfile
+      SecurityGroupIds:
+        - !GetAtt BackendSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: feiras-backend
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -eo pipefail
+          exec > /var/log/feiras-bootstrap.log 2>&1
+
+          apt-get update -y
+          apt-get install -y curl git jq awscli
+          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+          apt-get install -y nodejs
+          npm install -g pm2
+
+          # Clona o projeto
+          cd /home/ubuntu
+          git clone ${RepoURL} app
+          cd app/backend
+          mkdir -p /home/ubuntu/app/imagens/produtos /home/ubuntu/app/imagens/usuarios
+
+          # Recupera a senha do banco do Secrets Manager (sem ecoar em log)
+          DB_PASSWORD=$(aws secretsmanager get-secret-value \
+            --secret-id ${RDSInstance.MasterUserSecret.SecretArn} \
+            --query SecretString --output text --region ${AWS::Region} | jq -r .password)
+
+          # Gera o .env do backend
+          cat > .env <<EOF
+          DB_HOST=${RDSInstance.Endpoint.Address}
+          DB_USER=${DBUser}
+          DB_PASSWORD="${!DB_PASSWORD}"
+          DB_NAME=${DBName}
+          DB_PORT=3306
+          SESSION_SECRET=${SessionSecret}
+          PORT=4000
+          AWS_REGION=${AWS::Region}
+          SQS_QUEUE_URL=
+          NOTIFICATIONS_SQS_QUEUE_URL=
+          SNS_TOPIC_ARN=
+          EOF
+
+          npm install --production
+          chown -R ubuntu:ubuntu /home/ubuntu/app
+
+          # Importa o schema/seed inicial no banco via Node/mysql2 (idempotente).
+          # Usa o driver ja instalado pelo app e le as credenciais do .env, evitando
+          # depender de um cliente mysql do apt e problemas de quoting da senha.
+          cat > /tmp/import-db.js <<'JS'
+          const mysql = require('mysql2/promise');
+          const fs = require('fs');
+          require('dotenv').config();
+          (async () => {
+            const conn = await mysql.createConnection({
+              host: process.env.DB_HOST, user: process.env.DB_USER,
+              password: process.env.DB_PASSWORD, database: process.env.DB_NAME,
+              port: 3306, multipleStatements: true
+            });
+            const [rows] = await conn.query(
+              "SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = ?",
+              [process.env.DB_NAME]
+            );
+            if (rows[0].c === 0) {
+              const sql = fs.readFileSync('/home/ubuntu/app/bd/feiras.sql', 'utf8');
+              await conn.query(sql);
+              console.log('schema importado');
+            } else {
+              console.log('schema ja existe, pulando');
+            }
+            await conn.end();
+          })().catch(e => { console.error('import falhou:', e.message); });
+          JS
+          node /tmp/import-db.js
+
+          # Sobe a app com PM2 e habilita no boot
+          sudo -u ubuntu PM2_HOME=/home/ubuntu/.pm2 pm2 start server.js --name feiras-backend
+          sudo -u ubuntu PM2_HOME=/home/ubuntu/.pm2 pm2 save
+          env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
+
+  # =========================================================================
+  # CAMADA DE APRESENTACAO - EC2 Frontend (porta 3000)
+  # =========================================================================
+  FrontendSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Frontend Express - web (3000) e SSH (22)'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+
+  FrontendInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestUbuntuAMI
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      SecurityGroupIds:
+        - !GetAtt FrontendSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: feiras-frontend
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -eo pipefail
+          exec > /var/log/feiras-bootstrap.log 2>&1
+
+          apt-get update -y
+          apt-get install -y curl git
+          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+          apt-get install -y nodejs
+          npm install -g pm2
+
+          cd /home/ubuntu
+          git clone ${RepoURL} app
+          cd app/frontend
+
+          # Aponta o frontend para o DNS publico do backend
+          cat > .env <<EOF
+          PORT=3000
+          API_URL=http://${BackendInstance.PublicDnsName}:4000
+          ADMIN_URL=http://${BackendInstance.PublicDnsName}:4000
+          EOF
+
+          npm install --production
+          chown -R ubuntu:ubuntu /home/ubuntu/app
+
+          sudo -u ubuntu PM2_HOME=/home/ubuntu/.pm2 pm2 start server.js --name feiras-frontend
+          sudo -u ubuntu PM2_HOME=/home/ubuntu/.pm2 pm2 save
+          env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
+
+  # =========================================================================
+  # MENSAGERIA - SQS (filas) + SNS (notificacao por e-mail)
+  # =========================================================================
+  # Fila das mensagens de contato (rota /api/contato -> SQS_QUEUE_URL)
+  ContatoQueue:
+    Type: 'AWS::SQS::Queue'
+
+  # Fila das inscricoes de notificacao (rota /api/notificacoes -> NOTIFICATIONS_SQS_QUEUE_URL)
+  NotificacoesQueue:
+    Type: 'AWS::SQS::Queue'
+
+  # Topico que recebe o aviso de nova inscricao (rota /api/notificacoes -> SNS_TOPIC_ARN)
+  NotificacoesTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: 'Feiras Ecologicas'
+
+  # Inscricao de e-mail no topico (precisa ser confirmada pelo destinatario)
+  EmailSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      TopicArn: !Ref NotificacoesTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+# ---------------------------------------------------------------------------
+# Saidas
+# ---------------------------------------------------------------------------
+Outputs:
+  ContatoQueueUrl:
+    Description: 'URL da fila SQS de contato (SQS_QUEUE_URL)'
+    Value: !Ref ContatoQueue
+
+  NotificacoesQueueUrl:
+    Description: 'URL da fila SQS de notificacoes (NOTIFICATIONS_SQS_QUEUE_URL)'
+    Value: !Ref NotificacoesQueue
+
+  NotificacoesTopicArn:
+    Description: 'ARN do topico SNS de notificacoes (SNS_TOPIC_ARN)'
+    Value: !Ref NotificacoesTopic
+
+  FrontendURL:
+    Description: 'URL publica da aplicacao (acesse esta)'
+    Value: !Sub 'http://${FrontendInstance.PublicDnsName}:3000'
+
+  BackendURL:
+    Description: 'URL publica da API/painel admin do backend'
+    Value: !Sub 'http://${BackendInstance.PublicDnsName}:4000'
+
+  RDSEndpoint:
+    Description: 'Endpoint do RDS MySQL'
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  DBSecretArn:
+    Description: 'ARN do segredo (Secrets Manager) com a senha do banco'
+    Value: !GetAtt RDSInstance.MasterUserSecret.SecretArn
+
